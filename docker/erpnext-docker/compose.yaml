@@ -1,0 +1,168 @@
+# ------------------------
+# ERPNext Docker Compose for Apple Silicon (M1/M2/M3)
+# Fully stable for dev, QA automation, and Playwright
+# ------------------------
+
+# Anchors
+x-customizable-image: &customizable_image
+  image: ${CUSTOM_IMAGE:-frappe/erpnext}:${CUSTOM_TAG:-$ERPNEXT_VERSION}
+  pull_policy: ${PULL_POLICY:-always}
+  restart: ${RESTART_POLICY:-unless-stopped}
+
+x-backend-defaults: &backend_defaults
+  <<: *customizable_image
+  volumes:
+    - sites:/home/frappe/frappe-bench/sites
+  platform: linux/amd64
+
+# ------------------------
+# Services
+# ------------------------
+services:
+
+  # Configurator: writes common_site_config.json and apps.txt, then stays alive
+  configurator:
+    <<: *backend_defaults
+    restart: "no"
+    entrypoint:
+      - bash
+      - -c
+    command:
+      - |
+        set -e
+
+        echo "Waiting for Redis services..."
+        until python3 -c "import socket; s=socket.create_connection(('redis-cache',6379),2); s.close()" 2>/dev/null; do sleep 1; done
+        echo "  redis-cache ready"
+        until python3 -c "import socket; s=socket.create_connection(('redis-queue',6379),2); s.close()" 2>/dev/null; do sleep 1; done
+        echo "  redis-queue ready"
+        until python3 -c "import socket; s=socket.create_connection(('redis-socketio',6379),2); s.close()" 2>/dev/null; do sleep 1; done
+        echo "  redis-socketio ready"
+
+        echo "Writing apps.txt..."
+        ls -1 /home/frappe/frappe-bench/apps > /home/frappe/frappe-bench/sites/apps.txt
+        echo "apps.txt done"
+
+        echo "Writing common_site_config.json..."
+        python3 - <<'PYEOF'
+        import json, os
+        cfg_path = "/home/frappe/frappe-bench/sites/common_site_config.json"
+        try:
+            cfg = json.load(open(cfg_path)) if os.path.exists(cfg_path) else {}
+        except Exception:
+            cfg = {}
+        cfg.update({
+            "db_host": "db",
+            "db_port": 3306,
+            "redis_cache": "redis://redis-cache:6379",
+            "redis_queue": "redis://redis-queue:6379",
+            "redis_socketio": "redis://redis-socketio:6379",
+            "socketio_port": 9000,
+            "chromium_path": "/usr/bin/chromium-headless-shell",
+        })
+        json.dump(cfg, open(cfg_path, "w"), indent=2)
+        print("Config written:", json.dumps(cfg, indent=2))
+        PYEOF
+
+        echo "Configurator done. Sleeping..."
+        sleep infinity
+    environment:
+      DB_HOST: db
+      DB_PORT: 3306
+      REDIS_CACHE: redis-cache:6379
+      REDIS_QUEUE: redis-queue:6379
+      REDIS_SOCKETIO: redis-socketio:6379
+      SOCKETIO_PORT: 9000
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import json; cfg=json.load(open('/home/frappe/frappe-bench/sites/common_site_config.json')); assert 'redis-socketio' in cfg.get('redis_socketio','')\""]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+
+  # Backend
+  backend:
+    <<: *backend_defaults
+    depends_on:
+      configurator:
+        condition: service_healthy
+
+  # Frontend
+  frontend:
+    <<: *customizable_image
+    command: nginx-entrypoint.sh
+    environment:
+      BACKEND: backend:8000
+      SOCKETIO: websocket:9000
+    depends_on:
+      - backend
+      - websocket
+    volumes:
+      - sites:/home/frappe/frappe-bench/sites
+
+  # Websocket (Frappe real-time service)
+  websocket:
+    <<: *customizable_image
+    command: node /home/frappe/frappe-bench/apps/frappe/socketio.js
+    environment:
+      REDIS_CACHE: redis-cache:6379
+      REDIS_QUEUE: redis-queue:6379
+      REDIS_SOCKETIO: redis-socketio:6379
+    volumes:
+      - sites:/home/frappe/frappe-bench/sites
+    depends_on:
+      redis-socketio:
+        condition: service_started
+      configurator:
+        condition: service_healthy
+
+  # Queue workers
+  queue-short:
+    <<: *backend_defaults
+    command: bench worker --queue short,default
+    depends_on:
+      backend:
+        condition: service_started
+      redis-queue:
+        condition: service_started
+
+  queue-long:
+    <<: *backend_defaults
+    command: bench worker --queue long,default,short
+    depends_on:
+      backend:
+        condition: service_started
+      redis-queue:
+        condition: service_started
+
+  # Scheduler
+  scheduler:
+    <<: *backend_defaults
+    command: bench schedule
+    depends_on:
+      backend:
+        condition: service_started
+      redis-cache:
+        condition: service_started
+
+  # Redis services
+  redis-cache:
+    image: redis:7-alpine
+    restart: always
+    platform: linux/amd64
+
+  redis-queue:
+    image: redis:7-alpine
+    restart: always
+    platform: linux/amd64
+
+  redis-socketio:
+    image: redis:7-alpine
+    restart: always
+    platform: linux/amd64
+
+# ------------------------
+# Volumes
+# ------------------------
+volumes:
+  sites:

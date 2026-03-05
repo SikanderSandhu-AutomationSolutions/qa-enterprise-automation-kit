@@ -24,14 +24,16 @@
 ## Directory Structure
 
 ```
-erpnext-docker/
-├── compose.yaml              # Main compose file — defines all services
-├── pwd.yml                   # Disposable demo stack — everything in one file
-├── .env                      # Environment variable overrides (gitignored values go here)
-├── example.env               # Template for .env — safe to commit
-├── overrides/                # Optional compose overrides for different scenarios
-...
-└── DOCKER_CONFIG.md          # ← This file
+qa-enterprise-automation-kit/
+├── apps/
+│   └── erpnext-demo/          # ← ERPNext target system (isolated)
+│       ├── compose.yaml       # Main compose file
+│       ├── pwd.yml            # Demo stack
+│       └── ...
+├── framework/                 # Reusable core automation framework
+├── tests/                     # Domain-specific test suites
+├── ci/                        # CI/CD pipelines
+└── apps/erpnext-demo/DOCKER_CONFIG.md  # ← This file
 ```
 
 ---

@@ -28,17 +28,15 @@ services:
     command:
       - |
         set -e
-        BENCH=/home/frappe/frappe-bench
-        SITES=$BENCH/sites
-        CFG=$SITES/common_site_config.json
-
         echo "Waiting for Redis services..."
         until python3 -c "import socket; s=socket.create_connection(('redis-cache',6379),2); s.close()" 2>/dev/null; do sleep 1; done
+        echo "  redis-cache ready"
         until python3 -c "import socket; s=socket.create_connection(('redis-queue',6379),2); s.close()" 2>/dev/null; do sleep 1; done
-        until python3 -c "import socket; s=socket.create_connection(('redis-cache',6379),2); s.close()" 2>/dev/null; do sleep 1; done
+        echo "  redis-queue ready"
 
         echo "Writing apps.txt..."
         ls -1 /home/frappe/frappe-bench/apps > /home/frappe/frappe-bench/sites/apps.txt
+        echo "apps.txt done"
 
         echo "Writing common_site_config.json..."
         python3 - <<'PYEOF'

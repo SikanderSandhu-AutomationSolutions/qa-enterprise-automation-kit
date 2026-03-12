@@ -54,7 +54,8 @@ export class APIClient {
      * @returns A promise that resolves to the Playwright APIResponse object.
      */
     async get(endpoint: string, options?: any): Promise<APIResponse> {
-        return this.request.get(`${this.baseURL}/${endpoint.replace(/^\//, '')}`, options);
+        const url = this.baseURL ? `${this.baseURL}/${endpoint.replace(/^\//, '')}` : endpoint;
+        return this.request.get(url, options);
     }
 
     /**
@@ -65,6 +66,7 @@ export class APIClient {
      * @returns A promise that resolves to the Playwright APIResponse object.
      */
     async post(endpoint: string, options?: any): Promise<APIResponse> {
-        return this.request.post(`${this.baseURL}/${endpoint.replace(/^\//, '')}`, options);
+        const url = this.baseURL ? `${this.baseURL}/${endpoint.replace(/^\//, '')}` : endpoint;
+        return this.request.post(url, options);
     }
 }

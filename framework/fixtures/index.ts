@@ -11,8 +11,8 @@ export const test = base.extend<FrameworkFixtures>({
     basePage: async ({ page }, use) => {
         await use(new BasePage(page));
     },
-    apiClient: async ({ request }, use) => {
-        await use(new APIClient(request));
+    apiClient: async ({ request, baseURL }, use) => {
+        await use(new APIClient(request, baseURL));
     },
 });
 

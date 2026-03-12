@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { Database } from '../framework/utils/Database';
+import { Database } from '../../framework/core/Database';
 
 test.describe('Database Connectivity Validation', () => {
     let db: Database;

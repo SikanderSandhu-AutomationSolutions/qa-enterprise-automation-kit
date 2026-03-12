@@ -1,6 +1,6 @@
 import { test as base } from '@playwright/test';
-import { BasePage } from './BasePage';
-import { APIClient } from './APIClient';
+import { BasePage } from '../core/BasePage';
+import { APIClient } from '../core/APIClient';
 
 type FrameworkFixtures = {
     basePage: BasePage;

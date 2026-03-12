@@ -1,5 +1,5 @@
 import mysql from 'mysql2/promise';
-import { logger } from './Logger';
+import { logger } from '../utils/Logger';
 
 export class Database {
     private connection: mysql.Connection | null = null;

@@ -1,0 +1,84 @@
+# ERPNext Demo Environment Analysis
+
+## Overview
+
+The `apps/erpnext-demo` directory contains a single-command deployment configuration for Frappe/ERPNext (`pwd.yml`). This setup is intended for quick evaluations but provides a fully functional ERPNext system that is **perfectly suited for API and UI automation testing**.
+
+---
+
+## 1. API Automation Capabilities
+
+**Yes, API automation can absolutely be done on this environment.**
+
+Frappe (the underlying framework of ERPNext) automatically generates RESTful APIs for every "DocType" (database model) in the system.
+
+### API Entry Point
+- **Base URL**: `http://localhost:8080/api/`
+- **Health Check**: `GET http://localhost:8080/api/method/frappe.ping` (Returns `{"message": "pong"}`)
+
+### Authentication
+To automate API calls against this ERPNext instance, the automation framework will need to handle authentication via one of two methods:
+1. **Cookie-based Session**:
+   - `POST /api/method/login`
+   - Body: `usr=Administrator&pwd=admin`
+   - The response will set `sid` (session ID) cookies which must be passed in subsequent requests.
+2. **Token-based**:
+   - Creating API keys and secrets for a specific user via the UI/API, then passing the `Authorization: token API_KEY:API_SECRET` header.
+
+### Endpoint Structures
+1. **REST API (CRUD on Data)**:
+   - **GET** `/api/resource/[DocType]` - List records (e.g., `/api/resource/Customer`)
+   - **POST** `/api/resource/[DocType]` - Create a new record.
+   - **GET** `/api/resource/[DocType]/[Name]` - Get a specific record.
+   - **PUT** `/api/resource/[DocType]/[Name]` - Update a record.
+   - **DELETE** `/api/resource/[DocType]/[Name]` - Delete a record.
+2. **RPC API (Actionable Methods)**:
+   - **POST/GET** `/api/method/[dotted.path.to.function]` - Execute specific Python whitelist methods.
+
+---
+
+## 2. Database schema and access methods
+
+### Architecture
+- **Engine**: MariaDB 10.6 (`mariadb:10.6` docker image).
+- **Service Name in Network**: `db`
+- **Port**: `3306` inside the Docker network.
+- **Initialization**: The DB is provisioned by the `create-site` container which installs ERPNext using the database root credentials (`admin`/`admin`).
+
+### Access Methods for Automation
+Currently, `pwd.yml` **does not expose the database port (3306) to the host machine**.
+If the automation framework (`tests/`) runs on the host (macOS), it cannot connect directly to the MariaDB instance via a SQL client out of the box.
+
+**To enable direct DB assertions test scripts:**
+You would need to update `pwd.yml` (or your overriding compose file) to map the ports:
+```yaml
+  db:
+    ...
+    ports:
+      - "3306:3306"
+```
+Alternatively, all data verifications can be performed strictly through the robust ERPNext REST APIs rather than direct SQL queries.
+
+---
+
+## 3. The Data Journey & Dependencies
+
+ERPNext is fundamentally driven by a metadata structure known as "DocTypes".
+
+### Data Storage Journey
+1. **Request**: UI or API sends a JSON payload to `backend:8000`.
+2. **Processing**: Frappe framework validates the payload against the DocType schema.
+3. **Caching**: Reads/Writes often hit the `redis-cache` (Redis Alpine) before hitting the DB.
+4. **Persistence**: Saved permanently in MariaDB (`db-data` volume).
+5. **Background Jobs**: If the document creation triggers background reports or emails, it gets pushed to `redis-queue` and picked up by `queue-short` or `queue-long` worker containers.
+6. **Real-time UI Updates**: Pushed to the frontend via the `websocket` container (`socketio_port: 9000`).
+
+### Automation Strategy & Test Data Management
+Because the database state is persisted in an external Docker volume (`db-data`), tests must be written to be independent.
+- **Setup**: Tests should use the API to dynamically create prerequisites (e.g., A "Sales Order" test should programmatically create an "Item" and "Customer" first).
+- **Teardown**: The framework should clean up generated test data using `DELETE` API calls after execution.
+
+---
+
+## Conclusion
+The `apps/erpnext-demo` setup successfully encapsulates the target application. By pointing our new TypeScript/Playwright `APIClient` to `http://localhost:8080`, we can immediately begin writing API tests for ERPNext.

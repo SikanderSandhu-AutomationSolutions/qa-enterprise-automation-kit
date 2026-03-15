@@ -47,3 +47,105 @@ Instead of performing every action in a test through the browser UI, we use the 
 *   **Project Dependencies**: Configuring Playwright to run a setup project (Auth) before a main project (E2E).
 *   **Data Seeding**: Using API to create prerequisites so UI tests are dedicated to UX/Business flow validation.
 *   **Separation of Concerns**: UI tests for UI/UX; API setup for state/data management.
+
+---
+
+## 5. Visualizing the Hybrid Flow
+
+Understanding the orchestration between Playwright and your application is crucial for higher-level roles.
+
+### Control Flow (Execution Order)
+This diagram shows how Playwright ensures authentication happens *before* any UI tests begin.
+
+```mermaid
+graph TD
+    A["CLI: npx playwright test"] --> B["playwright.config.ts"]
+    B --> C["Project: 'setup'"]
+    C --> D["tests/setup/auth.setup.ts"]
+    D --> E["API Login & Save State"]
+    E --> F["Project: 'chromium'"]
+    F --> G["tests/e2e/login-bypass.spec.ts"]
+    G --> H["UI Test Execution (Authenticated)"]
+    
+    subgraph dependencies ["Dependency Rule"]
+    F -- depends on --> C
+    end
+```
+
+### Data Flow (Auth Lifecycle)
+This diagram shows how the session cookie travels through the system to enable the bypass.
+
+```mermaid
+sequenceDiagram
+    participant API as ERPNext API
+    participant Setup as auth.setup.ts
+    participant FS as File System (admin.json)
+    participant PW as Playwright Browser
+    participant App as ERPNext UI
+
+    Setup->>API: POST /api/method/login (usr/pwd)
+    API-->>Setup: Set-Cookie: sid=abc...
+    Setup->>FS: Save storageState()
+    Note over FS: Cookies + LocalStorage stored
+    PW->>FS: Load storageState
+    PW->>App: GOTO /app/selling
+    Note over PW,App: Browser sends 'sid' cookie automatically
+    App-->>PW: HTTP 200 (Dashboard Loaded)
+```
+
+---
+
+## 6. Deep Dive: Line-by-Line Breakdown
+
+This section provides the "How" for each critical file, perfect for answering technical implementation questions.
+
+### A. The Setup Hook (`auth.setup.ts`)
+
+```typescript
+// 10: setup('authenticate as Administrator', async ({ apiClient, request }) => {
+```
+*   **What's happening**: We define a `setup` test (a special run once per suite). We destructure `apiClient` (our framework fixture) and `request` (Playwright's low-level API utility).
+
+```typescript
+// 12: const response = await apiClient.login('Administrator', 'admin');
+```
+*   **What's happening**: We trigger the API login code. This hits the server, which responds with a `Set-Cookie` header containing the `sid` (session ID).
+
+```typescript
+// 16: await request.storageState({ path: authFile });
+```
+*   **What's happening**: **This is the most important line.** It reaches into the current request context, extracts all active cookies and local storage items, and serializes them into a JSON file (`admin.json`).
+
+### B. The Configuration Orchestration (`playwright.config.ts`)
+
+```typescript
+// 14: name: 'setup', testMatch: /.*\.setup\.ts/,
+```
+*   **What's happening**: We create a dedicated project for setup tasks. This keeps authentication logic separate from functional tests.
+
+```typescript
+// 24: dependencies: ['setup'],
+```
+*   **What's happening**: This tells Playwright: "Do not start the `chromium` project until the `setup` project has finished successfully." This ensures the `admin.json` file actually exists before we try to use it.
+
+```typescript
+// 22: storageState: 'playwright/.auth/admin.json',
+```
+*   **What's happening**: Before Playwright opens a browser window for an E2E test, it reads this JSON file and "injects" those cookies into the browser's context. The browser is essentially "pre-authenticated."
+
+### C. The E2E Bypass (`login-bypass.spec.ts`)
+
+```typescript
+// 12: await basePage.navigateTo('/app/selling');
+```
+*   **What's happening**: Since the browser already has the `sid` cookie, we don't need to visit `/login`. We navigate directly to an internal dashboard.
+
+```typescript
+// 15: await expect(page).not.toHaveURL(/.*login/);
+```
+*   **What's happening**: We assert that the application *accepted* our session. If the session was invalid, the ERP would have redirected us back to the login page. This line proves the bypass worked.
+
+```typescript
+// 18: await expect(page.locator('.page-container')).toBeVisible({ timeout: 15000 });
+```
+*   **What's happening**: We check for a UI element that only exists *inside* the app. This is the final verification that we have successfully bypassed the UI login and landed on the functional dashboard.
